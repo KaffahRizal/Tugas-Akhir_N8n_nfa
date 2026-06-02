@@ -1,0 +1,310 @@
+{
+  "name": "Workflow pembuat laporan arus kas naratif",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months"
+            }
+          ]
+        }
+      },
+      "id": "2e032f8f-a0eb-4245-8651-60d45d4aa65f",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        944,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1X7r-yK8cJ9hit03xy2arFfP53ejmubRauBmxueoM-LA",
+          "mode": "list",
+          "cachedResultName": "cashflow_AI_report",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1X7r-yK8cJ9hit03xy2arFfP53ejmubRauBmxueoM-LA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1X7r-yK8cJ9hit03xy2arFfP53ejmubRauBmxueoM-LA/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "f7c3d358-9334-4bc4-a61f-10d72b703ea1",
+      "name": "Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.3,
+      "position": [
+        1168,
+        -96
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SLz4d75Klde3Ulvb",
+          "name": "23_05_26"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FORMAT DATA — DYNAMIC VERSION\n// Otomatis membaca header apapun dari Google Sheets\n// Tidak perlu diubah meski kolom bertambah atau berganti nama\n// ============================================================\n\nconst items = $input.all();\n\n// Validasi: pastikan ada data\nif (!items || items.length === 0) {\n  throw new Error('Sheet kosong atau tidak ada data yang dibaca.');\n}\n\n// 1. Deteksi header secara otomatis dari baris pertama\nconst headers = Object.keys(items[0].json);\n\nif (headers.length === 0) {\n  throw new Error('Tidak ada kolom yang terdeteksi di sheet.');\n}\n\n// 2. Bangun tabel Markdown secara dinamis\nconst headerRow = '| ' + headers.join(' | ') + ' |';\nconst divider   = '| ' + headers.map(() => '---').join(' | ') + ' |';\n\nconst bodyRows = items.map(item => {\n  const row = item.json;\n  const cells = headers.map(h => {\n    const val = row[h];\n    return (val !== null && val !== undefined && val !== '') ? String(val) : '-';\n  });\n  return '| ' + cells.join(' | ') + ' |';\n}).join('\\n');\n\nconst markdownTable = [headerRow, divider, bodyRows].join('\\n');\n\n// 3. Hitung statistik numerik otomatis untuk SEMUA kolom angka\nconst numericStats = {};\nheaders.forEach(h => {\n  const values = items\n    .map(item => parseFloat(String(item.json[h]).replace(/[^0-9.-]/g, '')))\n    .filter(v => !isNaN(v));\n\n  if (values.length > 0) {\n    const sum = values.reduce((a, b) => a + b, 0);\n    numericStats[h] = {\n      total: sum,\n      rata_rata: sum / values.length,\n      tertinggi: Math.max(...values),\n      terendah: Math.min(...values),\n      jumlah_baris: values.length\n    };\n  }\n});\n\n// 4. Buat ringkasan statistik dalam format teks untuk prompt AI\nlet statsSummary = '';\nObject.entries(numericStats).forEach(([kolom, stat]) => {\n  statsSummary += `\\n- **${kolom}**: Total = ${stat.total.toLocaleString('id-ID')}, Rata-rata = ${stat.rata_rata.toLocaleString('id-ID')}, Tertinggi = ${stat.tertinggi.toLocaleString('id-ID')}, Terendah = ${stat.terendah.toLocaleString('id-ID')}`;\n});\n\n// 5. Metadata\nconst bulan = new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });\nconst spreadsheetName = 'cashflow_AI_report';\n\nreturn {\n  markdown_table: markdownTable,\n  headers: headers,\n  jumlah_kolom: headers.length,\n  jumlah_baris: items.length,\n  numeric_stats: numericStats,\n  stats_summary: statsSummary || 'Tidak ada kolom numerik terdeteksi.',\n  spreadsheet_name: spreadsheetName,\n  bulan: bulan\n};"
+      },
+      "id": "3e1292e1-8ff9-4654-bb86-7858e6496faa",
+      "name": "Format Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Kamu menerima data dari spreadsheet bernama **{{ $node[\"Format Data\"].json[\"spreadsheet_name\"] }}** untuk periode **{{ $node[\"Format Data\"].json[\"bulan\"] }}**.\n\nData memiliki **{{ $node[\"Format Data\"].json[\"jumlah_kolom\"] }} kolom** dan **{{ $node[\"Format Data\"].json[\"jumlah_baris\"] }} baris**.\nKolom yang tersedia: {{ $node[\"Format Data\"].json[\"headers\"].join(', ') }}\n\n---\n\n### Data Lengkap:\n{{ $node[\"Format Data\"].json[\"markdown_table\"] }}\n\n---\n\n### Statistik Otomatis (kolom numerik):\n{{ $node[\"Format Data\"].json[\"stats_summary\"] }}\n\n---\n\n### Tugas Anda:\nBerdasarkan data di atas, susunlah laporan analisis dengan struktur berikut:\n\n## 1. Ringkasan Data\nDeskripsikan secara singkat apa yang direpresentasikan data ini. Apa konteks bisnisnya? Bagaimana kondisi umum yang terlihat?\n\n## 2. Temuan Utama & Pola Menarik\nIdentifikasi minimal 3 insight paling penting dari data. Cari anomali, tren, nilai ekstrem, atau pola yang perlu diperhatikan manajemen.\n\n## 3. Analisis Mendalam\nPilih kolom atau kelompok data yang paling signifikan dan berikan analisis yang lebih dalam. Jelaskan mengapa hal ini penting bagi bisnis.\n\n## 4. Tiga Rekomendasi Strategis\nBerikan tepat 3 rekomendasi konkret dan actionable yang bisa diimplementasikan segera berdasarkan temuan di atas.\n\nPastikan output dalam format Markdown yang rapi dan mudah dipahami oleh eksekutif non-teknis.",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "Kamu adalah seorang Business Intelligence Analyst dan konsultan data senior yang berpengalaman. Kamu ahli membaca berbagai jenis data bisnis — keuangan, operasional, HR, sales, inventory, dan lainnya — lalu mengubahnya menjadi insight strategis yang actionable. Gunakan bahasa formal namun mudah dipahami. Fokus pada wawasan yang berdampak nyata pada bisnis, bukan sekadar deskripsi angka."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1600,
+        -96
+      ],
+      "id": "e41bbc21-41d9-4eac-8fca-bfd9d2aae218",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        80
+      ],
+      "id": "9629b663-e675-4629-87ee-4631b6488b74",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "TBKCwA5KivmDJdyo",
+          "name": "Groq account 2(kaff23)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "text",
+        "options": {
+          "fileName": "laporan_analisis.md"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1952,
+        -96
+      ],
+      "id": "f86c3ecd-2529-4b46-9d1b-c8abaabd6f4d",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://v2.convertapi.com/convert/md/to/pdf",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "convertApi",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "File",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {}
+        }
+      },
+      "id": "8abaab0c-1f9b-49f6-909b-2be112c2b0af",
+      "name": "Convert to PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2160,
+        -96
+      ],
+      "credentials": {
+        "convertApi": {
+          "id": "sq8guyymA2DCWEoZ",
+          "name": "ConvertAPI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "Files[0].FileData",
+        "options": {
+          "fileName": "laporan_analisis.pdf",
+          "mimeType": "application/pdf"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2368,
+        -96
+      ],
+      "id": "b767775d-2913-4b2f-9d89-19bde2dfc983",
+      "name": "Convert to File1"
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "5927421703",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=📊 *Laporan Analisis Data*\n\n📁 Sheet: {{ $node[\"Format Data\"].json[\"spreadsheet_name\"] }}\n📅 Periode: {{ $node[\"Format Data\"].json[\"bulan\"] }}\n📋 {{ $node[\"Format Data\"].json[\"jumlah_baris\"] }} baris × {{ $node[\"Format Data\"].json[\"jumlah_kolom\"] }} kolom\n\n_Dibuat otomatis oleh AI Analyst_"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2576,
+        -96
+      ],
+      "id": "ae233abf-8c10-4afa-8aa1-04dd8d92d671",
+      "name": "Send a document",
+      "webhookId": "496a2d2d-bb27-4c3b-8d88-3cfc8c438fc2",
+      "credentials": {
+        "telegramApi": {
+          "id": "xYSTNugeAnhHKLFA",
+          "name": "Telegram account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Format Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Data": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Convert to PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to PDF": {
+      "main": [
+        [
+          {
+            "node": "Convert to File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File1": {
+      "main": [
+        [
+          {
+            "node": "Send a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e4bd1631-a0dc-4d12-8fb3-a2ac443ac5f3",
+  "meta": {
+    "instanceId": "37e9a66e7d3e46d7627d672ccf295a9c9772ebeec4bcaca586afcb7d6b434629"
+  },
+  "id": "4FRxZuEqApC4szUh",
+  "tags": []
+}
